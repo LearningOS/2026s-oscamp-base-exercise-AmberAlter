@@ -16,11 +16,38 @@ use std::thread;
 ///
 /// Hint: Use `Arc<Mutex<usize>>` as the shared counter.
 pub fn concurrent_counter(n_threads: usize, count_per_thread: usize) -> usize {
-    // TODO: Create Arc<Mutex<usize>> with initial value 0
-    // TODO: Spawn n_threads threads
-    // TODO: In each thread, lock() and increment count_per_thread times
-    // TODO: Join all threads, return final value
-    todo!()
+    // 1. 创建一个被 Mutex 保护的初始值为 0 的计数器
+    // 2. 使用 Arc 包裹它，以便在多个线程间安全地共享引用计数
+    let counter = Arc::new(Mutex::new(0));
+    let mut handles = vec![];
+
+    for _ in 0..n_threads {
+        // 克隆 Arc 指针，增加引用计数，传入新线程
+        let counter_clone = Arc::clone(&counter);
+        
+        let handle = thread::spawn(move || {
+            for _ in 0..count_per_thread {
+                // 获取锁。lock() 返回一个 Result，unwrap() 用于处理可能的锁中毒
+                let mut num = counter_clone.lock().expect("Mutex poisoned");
+                
+                // 修改内部数据，num 会在作用域结束时自动释放锁（RAII）
+                *num += 1;
+            }
+        });
+        
+        handles.push(handle);
+    }
+
+    // 等待所有线程执行完毕
+    for handle in handles {
+        handle.join().unwrap();
+    }
+
+    // 此时所有线程已结束，安全地取出最终值
+    // 使用 * 获取 MutexGuard 内部的值，再通过 .unwrap() 之后的值其实在作用域内
+    let final_result = *counter.lock().expect("Mutex poisoned");
+    
+    final_result
 }
 
 /// Add elements to a shared vector concurrently using multiple threads.
@@ -29,10 +56,31 @@ pub fn concurrent_counter(n_threads: usize, count_per_thread: usize) -> usize {
 ///
 /// Hint: Use `Arc<Mutex<Vec<usize>>>`.
 pub fn concurrent_collect(n_threads: usize) -> Vec<usize> {
-    // TODO: Create Arc<Mutex<Vec<usize>>>
-    // TODO: Each thread pushes its own id
-    // TODO: After joining all threads, sort the result and return
-    todo!()
+    let shared_vec = Arc::new(Mutex::new(Vec::new()));
+    let mut handles = vec![];
+
+    for i in 0..n_threads {
+        let vec_clone = Arc::clone(&shared_vec);
+        
+        let handle = thread::spawn(move || {
+            let mut vec = vec_clone.lock().expect("Mutex poisoned");
+            vec.push(i);
+        });
+        
+        handles.push(handle);
+    }
+
+    for handle in handles {
+        handle.join().unwrap();
+    }
+
+    // 获取锁并克隆数据以返回
+    let mut result = shared_vec.lock().expect("Mutex poisoned").clone();
+    
+    // 对结果进行排序，确保输出顺序一致
+    result.sort();
+    
+    result
 }
 
 #[cfg(test)]
