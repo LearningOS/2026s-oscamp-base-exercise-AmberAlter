@@ -209,7 +209,9 @@ pub fn increment_thread_local() -> usize {
         let mut count = cell.borrow_mut();
         *count += 1;
         *count
-    })
+    });
+    
+    new_count 
 }
 
 /// Spawn two threads using a **scoped thread** to compute the sum of two slices without moving ownership.
