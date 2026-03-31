@@ -53,23 +53,32 @@ pub struct SyscallABI {
 
 /// Return the x86_64 Linux syscall ABI description
 pub fn x86_64_abi() -> SyscallABI {
-    // TODO: Fill in the x86_64 syscall ABI
-    // Hint: x86_64 uses the "syscall" instruction, syscall number in rax
-    todo!()
+    SyscallABI {
+        instruction: "syscall",
+        syscall_num_reg: "rax",
+        args: &["rdi", "rsi", "rdx", "r10", "r8", "r9"],
+        return_reg: "rax",
+    }
 }
 
 /// Return the aarch64 Linux syscall ABI description
 pub fn aarch64_abi() -> SyscallABI {
-    // TODO: Fill in the aarch64 syscall ABI
-    // Hint: aarch64 uses the "svc #0" instruction, syscall number in x8
-    todo!()
+    SyscallABI {
+        instruction: "svc #0",
+        syscall_num_reg: "x8",
+        args: &["x0", "x1", "x2", "x3", "x4", "x5"],
+        return_reg: "x0",
+    }
 }
 
 /// Return the riscv64 Linux syscall ABI description
 pub fn riscv64_abi() -> SyscallABI {
-    // TODO: Fill in the riscv64 syscall ABI
-    // Hint: riscv64 uses the "ecall" instruction, syscall number in a7
-    todo!()
+    SyscallABI {
+        instruction: "ecall",
+        syscall_num_reg: "a7",
+        args: &["a0", "a1", "a2", "a3", "a4", "a5"],
+        return_reg: "a0",
+    }
 }
 
 // ============================================================
