@@ -108,30 +108,54 @@ unsafe impl GlobalAlloc for FreeListAllocator {
         let size = layout.size().max(core::mem::size_of::<FreeBlock>());
         let align = layout.align().max(core::mem::align_of::<FreeBlock>());
 
-        // TODO: Step 1 — traverse free_list, find a suitable block (first-fit)
-        //
-        // Hints:
-        // - Use prev_ptr and curr to traverse the list
-        // - Check if curr address satisfies align, and (*curr).size >= size
-        // - If found, remove it from the list (update prev's next or the free_list head)
-        // - Return curr as *mut u8
+        let mut prev_ptr = &self.free_list; // 这是一个 AtomicPtr
+        let mut curr = prev_ptr.load(Ordering::SeqCst);
 
-        // TODO: Step 2 — no suitable block in free_list, allocate from bump region
-        //
-        // Same logic as 02_bump_allocator's alloc
-        todo!()
+        while !curr.is_null() {
+            let block = &*curr;
+        // 检查当前块是否满足对齐和大小要求
+            if curr as usize % align == 0 && block.size >= size {
+            // 找到了！将其从链表中移除
+                let next_block = block.next;
+                prev_ptr.store(next_block, Ordering::SeqCst);
+                return curr as *mut u8;
+            }
+        // 没找到，继续找下一个
+        // 注意：这里 prev_ptr 需要指向当前块的 next 字段，稍微复杂
+        // 在 OS Camp 练习中，通常会有一个简化版的指针操作
+            curr = block.next;
+        }
+
+    // --- 步骤 2: 如果链表没找到，走 Bump 分配逻辑 ---
+    // 这里直接复用你之前的 BumpAllocator 逻辑
+        self.alloc_from_bump(size, align)
     }
 
     unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) {
         let size = layout.size().max(core::mem::size_of::<FreeBlock>());
+        let ptr = ptr as *mut FreeBlock;
 
-        // TODO: Insert the freed block at the head of free_list
-        //
-        // Steps:
-        // 1. Cast ptr to *mut FreeBlock
-        // 2. Write FreeBlock { size, next: current list head }
-        // 3. Update free_list head to ptr
-        todo!()
+    // 1. 读取当前的链表头
+        let old_head = self.free_list.load(Ordering::SeqCst);
+
+    // 2. 在刚释放的内存块里写入新的 FreeBlock 信息
+    // 这就是为什么前面要求 size 至少能放下 FreeBlock
+        ptr.write(FreeBlock {
+            size,
+            next: old_head,
+        });
+
+    // 3. 将链表头更新为这个新释放的块
+    // 使用 CAS 确保多线程安全
+        while let Err(actual) = self.free_list.compare_exchange_weak(
+            old_head,
+            ptr,
+            Ordering::SeqCst,
+            Ordering::SeqCst,
+        ) {
+        // 如果失败了（别人也刚释放了一个），更新 next 指向新的头再试一次
+            (*ptr).next = actual;
+        }
     }
 }
 

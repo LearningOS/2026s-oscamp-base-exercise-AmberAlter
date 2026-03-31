@@ -63,18 +63,41 @@ impl BumpAllocator {
 
 unsafe impl GlobalAlloc for BumpAllocator {
     unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
-        // TODO: Implement bump allocation
-        //
-        // Steps:
-        // 1. Load current next (use Ordering::SeqCst)
-        // 2. Align next up to layout.align()
-        //    Hint: align_up(addr, align) = (addr + align - 1) & !(align - 1)
-        // 3. Compute allocation end = aligned + layout.size()
-        // 4. If end > heap_end, return null_mut()
-        // 5. Atomically update next to end using compare_exchange
-        //    (if CAS fails, another thread raced — retry in a loop)
-        // 6. Return the aligned address as a pointer
-        todo!()
+    let size = layout.size();
+    let align = layout.align();
+
+    // 开启一个循环，应对并发竞争失败时的重试
+    loop {
+        // 1. 加载当前的 next 指针
+        let current_next = self.next.load(Ordering::SeqCst);
+
+        // 2. 向上对齐地址
+        // 注意：计算要在 usize 层面进行
+        let alloc_start = (current_next + align - 1) & !(align - 1);
+        
+        // 3. 计算分配结束的位置
+        let alloc_end = match alloc_start.checked_add(size) {
+            Some(end) => end,
+            None => return null_mut(), // 溢出了
+        };
+
+        // 4. 边界检查：是否超过了堆的末尾
+        if alloc_end > self.heap_end {
+            return null_mut();
+        }
+
+        // 5. 原子更新 next 指针 (CAS)
+        // 如果 current_next 没变，就更新为 alloc_end
+        match self.next.compare_exchange_weak(
+            current_next,
+            alloc_end,
+            Ordering::SeqCst,
+            Ordering::SeqCst,
+        ) {
+            Ok(_) => return alloc_start as *mut u8, // 成功！返回对齐后的起始地址
+            Err(_) => continue, // 刚才被别的线程抢先了，重试循环
+        }
+    }
     }
 
     unsafe fn dealloc(&self, _ptr: *mut u8, _layout: Layout) {
