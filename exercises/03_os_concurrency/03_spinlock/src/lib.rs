@@ -40,23 +40,43 @@ impl<T> SpinLock<T> {
     /// # Safety
     /// Caller must ensure `unlock` is called after using the data.
     pub fn lock(&self) -> &mut T {
-        // TODO
-        todo!()
+        while self.locked.compare_exchange(
+            false,            // 期望：锁是开着的
+            true,             // 目标：我要把它关上（上锁）
+            Ordering::Acquire, // 成功：我们要“获取”资源，确保看到之前解锁人的数据
+            Ordering::Relaxed  // 失败：没抢到，无所谓，不用同步
+        ).is_err() {
+            // 2. 没抢到？休息一下 CPU，继续循环
+            core::hint::spin_loop();
+        }
+
+        // 3. 抢到了！把内部数据的原始指针转成 Rust 的可变引用
+        // Unsafe 是因为编译器无法自动证明你已经上锁了，需要你人工担保
+        unsafe { &mut *self.data.get() }
     }
 
     /// Release lock.
     ///
     /// TODO: Set locked to false (using Release ordering)
     pub fn unlock(&self) {
-        // TODO
-        todo!()
+        self.locked.store(false, Ordering::Release);
     }
 
     /// Try to acquire lock without spinning.
     /// Returns Some(&mut T) on success, None if lock is busy.
     pub fn try_lock(&self) -> Option<&mut T> {
-        // TODO: Single compare_exchange attempt
-        todo!()
+        if self.locked.compare_exchange(
+            false, 
+            true, 
+            Ordering::Acquire, 
+            Ordering::Relaxed
+        ).is_ok() {
+            // 抢到了
+            Some(unsafe { &mut *self.data.get() })
+        } else {
+            // 锁被人占着，我不等了
+            None
+        }
     }
 }
 
