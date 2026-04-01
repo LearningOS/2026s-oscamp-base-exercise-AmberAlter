@@ -137,7 +137,23 @@ impl Scheduler {
     ///    `sp` must be 16-byte aligned (e.g. `(stack_top - 16) & !15` to leave headroom).
     /// 3. Push a `GreenThread` with this context, state `Ready`, and `entry` stored for the wrapper to call.
     pub fn spawn(&mut self, entry: extern "C" fn()) {
-        todo!("alloc stack, init ctx with ra=thread_wrapper and aligned sp, push GreenThread(Ready, entry)")
+        // 1. 申请栈空间，拿到 buffer 和栈顶地址
+        let (stack_buffer, stack_top) = alloc_stack();
+
+        // 2. 创建一个空白的上下文
+        let mut context = TaskContext::default();
+
+        // 3. 初始化上下文：注意！ra 设为 thread_wrapper，这样 switch 过去后
+        // 会先进到包装函数里，包装函数再去执行真正的 entry。
+        context.init(stack_top, thread_wrapper as usize);
+
+        // 4. 创建线程对象并加入队列，初始状态是 Ready
+        self.threads.push(GreenThread {
+            context,
+            stack: stack_buffer,
+            state: ThreadState::Ready,
+            entry: Some(entry), // 把真正的函数存着，等 wrapper 启动
+        });
     }
 
     /// Run the scheduler until all threads (except the main one) are `Finished`.
@@ -146,12 +162,60 @@ impl Scheduler {
     /// 2. Loop: if all threads in `threads[1..]` are `Finished`, break; otherwise call `schedule_next()` (which may switch away and later return).
     /// 3. Clear `SCHEDULER` when done.
     pub fn run(&mut self) {
-        todo!("set SCHEDULER to self, loop until threads[1..] all Finished, call schedule_next, then clear SCHEDULER")
+        // 1. 设置全局指针，让 yield_now 能找到调度器
+        unsafe { SCHEDULER = self as *mut _; }
+
+        // 2. 主循环
+        loop {
+        // 检查 threads[1..] 是否全部 Finished (threads[0] 通常是主线程)
+            let all_done = self.threads.iter().skip(1).all(|t| t.state == ThreadState::Finished);
+            if all_done {
+                break;
+        }   
+
+            // 3. 运行下一个就绪的任务
+            self.schedule_next();
+        }
+
+        // 4. 任务结束，清空指针
+        unsafe { SCHEDULER = core::ptr::null_mut(); }
     }
 
     /// Find the next ready thread (starting from `current + 1` round-robin), mark current as `Ready` (if not `Finished`), mark next as `Running`, set `CURRENT_THREAD_ENTRY` if the next thread has an entry, then switch to it.
     fn schedule_next(&mut self) {
-        todo!("round-robin find next Ready, set current Ready (if not Finished), next Running, CURRENT_THREAD_ENTRY, then switch_context")
+        let old_idx = self.current;
+    
+        // 1. 寻找下一个处于 Ready 状态的线程 (循环找一圈)
+        let mut next_idx = (old_idx + 1) % self.threads.len();
+        while self.threads[next_idx].state != ThreadState::Ready {
+            next_idx = (next_idx + 1) % self.threads.len();
+            if next_idx == old_idx { return; } // 全在忙或全结束了，直接返回
+        }
+
+        // 2. 状态切换
+        // 如果当前线程没结束，把它设回 Ready，等下次轮转
+        if self.threads[old_idx].state == ThreadState::Running {
+            self.threads[old_idx].state = ThreadState::Ready;
+        }   
+    
+        // 把目标线程设为 Running
+        self.threads[next_idx].state = ThreadState::Running;
+        self.current = next_idx;
+
+        // 3. 如果新线程有入口函数，传给全局变量供 wrapper 使用
+        unsafe { CURRENT_THREAD_ENTRY = self.threads[next_idx].entry; }
+
+        // 4. 见证奇迹：换脑手术
+        unsafe {
+            // 获取两个任务上下文的原始指针
+            let old_ctx = &mut self.threads[old_idx].context as *mut TaskContext;
+            let new_ctx = &self.threads[next_idx].context as *const TaskContext;
+        
+            // 调用你之前写的汇编函数！
+            // 执行完这一行后，当前的 CPU 实际上已经去跑 next_idx 的代码了。
+            // 直到下次它被切回来，才会执行这一行之后的代码。
+            switch_context(&mut *old_ctx, &*new_ctx);
+        }
     }
 }
 
