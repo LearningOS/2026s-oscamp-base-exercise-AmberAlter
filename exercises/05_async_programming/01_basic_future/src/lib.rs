@@ -33,7 +33,21 @@ impl Future for CountDown {
     type Output = &'static str;
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        todo!()
+        let this = self.get_mut();
+
+        // 2. 检查计数器
+        if this.count == 0 {
+            // 倒计时结束，返回 Ready
+            Poll::Ready("liftoff!")
+        } else {
+            // 3. 还没到时间，减 1
+            this.count -= 1;
+            
+            // 4. 重要！告诉执行器（Executor）：“我现在还没好，但请尽快再来 poll 我一次”
+            cx.waker().wake_by_ref();
+            
+            // 5. 返回 Pending，交出 CPU
+            Poll::Pending
     }
 }
 
@@ -57,7 +71,21 @@ impl Future for YieldOnce {
     type Output = ();
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        todo!()
+        let this = self.get_mut();
+
+        if !this.yielded {
+            // 1. 第一次进来：标记为已让路
+            this.yielded = true;
+            
+            // 2. 叫醒自己：通知调度器，我已经准备好进行第二次轮询了
+            cx.waker().wake_by_ref();
+            
+            // 3. 假装自己很忙，返回 Pending
+            Poll::Pending
+        } else {
+            // 4. 第二次进来：直接完工
+            Poll::Ready(())
+        }
     }
 }
 
